@@ -3,20 +3,16 @@ import 'package:provider/provider.dart';
 import 'providers/wallet_provider.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/backup_screen.dart';
-import 'screens/pin_screen.dart'; // Mos harro kete import
+import 'screens/pin_screen.dart';
 
 void main() async {
-  // Sigurohemi qe Flutter eshte gati para se te nisim Provider-in
   WidgetsFlutterBinding.ensureInitialized();
-
   final walletProvider = WalletProvider();
-  await walletProvider.init(); // Ky inicializon adresen dhe PIN-in
+  await walletProvider.init();
 
   runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider.value(value: walletProvider),
-      ],
+    ChangeNotifierProvider.value(
+      value: walletProvider,
       child: const WarthogProApp(),
     ),
   );
@@ -38,16 +34,10 @@ class WarthogProApp extends StatelessWidget {
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.orange,
             foregroundColor: Colors.black,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
       ),
-      // Perdorim MainGate per te vendosur se ku do shkoje perdoruesi
       home: const MainGate(),
-      routes: {
-        '/dashboard': (context) => const DashboardScreen(),
-      },
     );
   }
 }
@@ -59,71 +49,68 @@ class MainGate extends StatelessWidget {
   Widget build(BuildContext context) {
     final wallet = context.watch<WalletProvider>();
 
-    // LOGJIKA E NAVIGIMIT (Sipas sigurise):
+    // 1. Loading State
+    if (wallet.isBusy && wallet.address == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: Colors.orange)),
+      );
+    }
 
-    // 1. Nese nuk ka portofol te krijuar
+    // 2. Setup (Nëse s'ka wallet)
     if (wallet.address == null) {
       return const WelcomeScreen();
     }
 
-    // 2. Nese ka portofol por eshte i kycur (Locked) me PIN
+    // 3. Security (Kyçja)
     if (wallet.isLocked) {
       return const PinScreen(isSettingPin: false);
     }
 
-    // 3. Nese gjithcka eshte OK dhe e hapur
+    // 4. Dashboard
     return const DashboardScreen();
   }
 }
 
-// WelcomeScreen mbetet njesoj sic e ke ti...
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
 
-  // ... pjesa tjeter e kodit tend per _showCreateDialog dhe _showImportDialog ...
-  // Sigurohu qe t'i mbash ato funksione ketu poshte njesoj sic i ke
-
   @override
   Widget build(BuildContext context) {
-    final wallet = context.watch<WalletProvider>();
     return Scaffold(
       body: Center(
-        child: wallet.isBusy
-            ? const CircularProgressIndicator(color: Colors.orange)
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.account_balance_wallet,
-                      size: 100, color: Colors.orange),
-                  const SizedBox(height: 20),
-                  const Text("WARTHOG PRO",
-                      style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2)),
-                  const SizedBox(height: 50),
-                  SizedBox(
-                    width: 250,
-                    height: 60,
-                    child: ElevatedButton(
-                      onPressed: () => _showCreateDialog(context),
-                      child: const Text("KRIJO PORTOFOL",
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  TextButton(
-                    onPressed: () => _showImportDialog(context),
-                    child: const Text("Importo me Seed Phrase",
-                        style: TextStyle(color: Colors.grey, fontSize: 16)),
-                  )
-                ],
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.account_balance_wallet,
+                size: 100, color: Colors.orange),
+            const SizedBox(height: 20),
+            const Text(
+              "WARTHOG PRO",
+              style: TextStyle(
+                  fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 2),
+            ),
+            const SizedBox(height: 50),
+            SizedBox(
+              width: 250,
+              height: 60,
+              child: ElevatedButton(
+                onPressed: () => _showCreateDialog(context),
+                child: const Text("KRIJO PORTOFOL",
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               ),
+            ),
+            const SizedBox(height: 20),
+            TextButton(
+              onPressed: () => _showImportDialog(context),
+              child: const Text("Importo me Seed Phrase",
+                  style: TextStyle(color: Colors.grey, fontSize: 16)),
+            )
+          ],
+        ),
       ),
     );
   }
 
-  // Shto ketu metodat _showCreateDialog dhe _showImportDialog qe kishit me pare
   void _showCreateDialog(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -135,21 +122,16 @@ class WelcomeScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("Krijo Portofol të Ri",
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white)),
-            const SizedBox(height: 20),
             ListTile(
               leading: const Icon(Icons.looks_one, color: Colors.orange),
               title: const Text("12 Fjalë (Standard)"),
               onTap: () async {
                 Navigator.pop(ctx);
                 await context.read<WalletProvider>().createWallet(12);
-                if (context.mounted)
+                if (context.mounted) {
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const BackupScreen()));
+                }
               },
             ),
             ListTile(
@@ -158,9 +140,10 @@ class WelcomeScreen extends StatelessWidget {
               onTap: () async {
                 Navigator.pop(ctx);
                 await context.read<WalletProvider>().createWallet(24);
-                if (context.mounted)
+                if (context.mounted) {
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const BackupScreen()));
+                }
               },
             ),
           ],
@@ -179,22 +162,17 @@ class WelcomeScreen extends StatelessWidget {
         content: TextField(
           controller: controller,
           maxLines: 3,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: "Shkruaj fjalët këtu...",
-            hintStyle: TextStyle(color: Colors.grey),
-            enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: Colors.orange)),
-          ),
+          decoration: const InputDecoration(hintText: "Shkruaj fjalët këtu..."),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text("Anulo")),
           ElevatedButton(
             onPressed: () async {
-              String mnemonic = controller.text.trim();
-              if (mnemonic.isNotEmpty) {
-                await context.read<WalletProvider>().importWallet(mnemonic);
+              if (controller.text.trim().isNotEmpty) {
+                await context
+                    .read<WalletProvider>()
+                    .importWallet(controller.text.trim());
                 if (context.mounted) Navigator.pop(ctx);
               }
             },

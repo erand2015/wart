@@ -8,9 +8,8 @@ class WalletProvider with ChangeNotifier {
   double _balance = 0.0;
   List<dynamic> _transactions = [];
   bool _isLoading = false;
-  
-  // PIN LOGIC - E nisim si TRUE që të bëhet kontrolli në MainGate
   bool _isLocked = true; 
+  bool _isNodeOnline = false; // Ky tregon statusin e nyjes
 
   String? get address => _address;
   double get balance => _balance;
@@ -18,146 +17,101 @@ class WalletProvider with ChangeNotifier {
   bool get isBusy => _isLoading;
   String? get tempMnemonic => _tempMnemonic;
   bool get isLocked => _isLocked;
+  bool get isNodeOnline => _isNodeOnline;
 
-  // 1. Inicializimi i detyruar
   Future<void> init() async {
     _isLoading = true;
     notifyListeners();
-    
     _address = await _walletService.getAddress();
-    
-    // Kontrollojmë memorien e sigurt për PIN
     String? savedPin = await _walletService.secureStorage.read(key: 'user_pin');
     
-    if (savedPin != null && savedPin.isNotEmpty) {
-      _isLocked = true; // Ka PIN, app qëndron i mbyllur
+    if (_address != null && savedPin != null && savedPin.isNotEmpty) {
+      _isLocked = true;
+      refresh(); 
     } else {
-      _isLocked = false; // S'ka PIN, app hapet (për setup-in e parë)
+      _isLocked = false;
     }
-
-    if (_address != null) {
-      await refresh();
-    }
-    
     _isLoading = false;
     notifyListeners();
   }
 
-  // 2. Menaxhimi i PIN
+  // --- REFRESH I PËRDITËSUAR ---
+  Future<void> refresh() async {
+    if (_address == null) return;
+    
+    // Resetojmë statusin: e bëjmë offline sa fillon kontrolli
+    _isNodeOnline = false;
+    notifyListeners(); 
+    
+    try {
+      // Nëse kjo vijë dështon, hidhemi direkt te 'catch'
+      final data = await _walletService.getLiveState(_address!);
+      
+      _balance = (data['balance'] ?? 0.0).toDouble();
+      _transactions = data['transactions'] ?? [];
+      
+      // Nëse arritëm këtu, nyja është OK
+      _isNodeOnline = true; 
+    } catch (e) {
+      debugPrint("Nyja dështoi: $e");
+      _isNodeOnline = false; // Konfirmojmë dritën e kuqe
+    }
+    notifyListeners();
+  }
+
+  Future<void> lockApp() { _isLocked = true; notifyListeners(); return Future.value(); }
   Future<void> setPin(String pin) async {
     await _walletService.secureStorage.write(key: 'user_pin', value: pin);
-    _isLocked = false; 
-    notifyListeners();
+    _isLocked = false; notifyListeners();
   }
-
   Future<bool> verifyPin(String inputPin) async {
     String? savedPin = await _walletService.secureStorage.read(key: 'user_pin');
-    if (savedPin == inputPin) {
-      _isLocked = false;
-      notifyListeners();
-      return true;
-    }
+    if (savedPin == inputPin) { _isLocked = false; notifyListeners(); return true; }
     return false;
   }
-
-  Future<String?> getSavedPin() async {
-    return await _walletService.secureStorage.read(key: 'user_pin');
-  }
-
-  Future<void> removePin() async {
-    await _walletService.secureStorage.delete(key: 'user_pin');
-    _isLocked = false;
-    notifyListeners();
-  }
-
-  void lockApp() {
-    _isLocked = true;
-    notifyListeners();
-  }
-
-  // 3. Funksionet e Wallet
   Future<void> createWallet(int words) async {
-    _isLoading = true;
-    notifyListeners();
-    int strength = (words == 12) ? 128 : 256;
-    _tempMnemonic = _walletService.generateNewMnemonic(strength: strength);
-    _isLoading = false;
-    notifyListeners();
+    _isLoading = true; notifyListeners();
+    _tempMnemonic = _walletService.generateNewMnemonic(strength: words == 12 ? 128 : 256);
+    _isLoading = false; notifyListeners();
   }
-
   Future<void> confirmWallet() async {
     if (_tempMnemonic != null) {
-      _isLoading = true;
-      notifyListeners();
+      _isLoading = true; notifyListeners();
       await importWallet(_tempMnemonic!);
       _tempMnemonic = null;
-      _isLoading = false;
-      notifyListeners();
+      _isLoading = false; notifyListeners();
     }
   }
-
   Future<void> importWallet(String mnemonic) async {
     try {
       final walletData = await _walletService.deriveWallet(mnemonic.trim());
       _address = walletData['address'];
       await _walletService.saveWallet(mnemonic.trim(), _address!);
-      await refresh();
-    } catch (e) {
-      debugPrint("Import Error: $e");
-    }
+      refresh();
+    } catch (e) { debugPrint("Import Error: $e"); }
     notifyListeners();
   }
-
-  Future<void> refresh() async {
-    if (_address == null) return;
-    try {
-      final data = await _walletService.getLiveState(_address!);
-      _balance = (data['balance'] ?? 0.0).toDouble();
-      _transactions = data['transactions'] ?? [];
-    } catch (e) {
-      debugPrint("Refresh Error: $e");
-    }
-    notifyListeners();
-  }
-
   Future<bool> sendRealMoney(String toAddress, double amount) async {
-    _isLoading = true;
-    notifyListeners();
+    _isLoading = true; notifyListeners();
     try {
       final mnemonic = await _walletService.getMnemonic();
       if (mnemonic == null) return false;
       final walletData = await _walletService.deriveWallet(mnemonic);
       final state = await _walletService.getLiveState(_address!);
-      
       bool success = await _walletService.sendTransaction(
         privateKeyHex: walletData['privateKey']!,
         toAddress: toAddress,
         amount: amount,
-        nonce: state['nonce'],
+        nonce: state['nonce'] ?? 0,
       );
-
-      if (success) {
-        await Future.delayed(const Duration(seconds: 2));
-        await refresh();
-      }
-      _isLoading = false;
-      notifyListeners();
-      return success;
-    } catch (e) {
-      _isLoading = false;
-      notifyListeners();
-      return false;
-    }
+      if (success) { await Future.delayed(const Duration(seconds: 2)); refresh(); }
+      _isLoading = false; notifyListeners(); return success;
+    } catch (e) { _isLoading = false; _isNodeOnline = false; notifyListeners(); return false; }
   }
-
   Future<void> logout() async {
     await _walletService.clear();
-    _address = null;
-    _balance = 0.0;
-    _transactions = [];
-    _isLocked = false;
+    _address = null; _balance = 0.0; _transactions = []; _isLocked = false; _isNodeOnline = false;
     notifyListeners();
   }
-
   Future<String?> getMnemonic() async => await _walletService.getMnemonic();
 }
